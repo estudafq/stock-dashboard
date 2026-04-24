@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Dashboard Ações", page_icon="📊", layout="wide")
 
-# 🔥 SOLUÇÃO 2 – remover margens e expandir tudo
 st.markdown("""
 <style>
 .block-container {
@@ -16,7 +15,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Tickers (com QQQ3)
 TICKERS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
     "META", "TSLA", "AMD", "AVGO", "ASML",
@@ -36,7 +34,6 @@ PERIODS = {
     "6m": 126
 }
 
-# Estado
 if "selected_ticker" not in st.session_state:
     st.session_state.selected_ticker = "AAPL"
 
@@ -45,7 +42,6 @@ if "selected_period" not in st.session_state:
 
 st.title("📊 Dashboard Ações")
 
-# Dados
 @st.cache_data(ttl=300)
 def get_history(ticker):
     return yf.Ticker(ticker).history(period="1y", interval="1d").dropna()
@@ -59,7 +55,7 @@ def color_pct(val):
     if isinstance(val, (int, float)):
         if val > 0:
             return "color:#22c55e; font-weight:700;"
-        elif val < 0:
+        if val < 0:
             return "color:#ef4444; font-weight:700;"
     return ""
 
@@ -85,7 +81,6 @@ def signal(v30, v3m, v6m, ticker):
         return "📈 Subida forte"
     return "Normal"
 
-# Construir tabela
 rows = []
 
 for ticker in TICKERS:
@@ -120,7 +115,6 @@ for ticker in TICKERS:
 
 df = pd.DataFrame(rows)
 
-# Estilo
 styled_df = df.drop(columns=["raw_ticker"]).style.format({
     "Preço": "{:.2f}",
     "Hoje %": "{:+.2f}%",
@@ -138,13 +132,11 @@ st.caption("Ordena clicando nos títulos. Clica numa linha para selecionar a aç
 event = st.dataframe(
     styled_df,
     use_container_width=True,
-    height=550,
     hide_index=True,
     on_select="rerun",
     selection_mode="single-row"
 )
 
-# Seleção
 try:
     if event.selection.rows:
         idx = event.selection.rows[0]
@@ -152,7 +144,6 @@ try:
 except:
     pass
 
-# Período
 st.markdown("### Período")
 
 period = st.segmented_control(
@@ -165,7 +156,6 @@ period = st.segmented_control(
 if period:
     st.session_state.selected_period = period
 
-# Gráfico
 ticker = st.session_state.selected_ticker
 days = PERIODS[st.session_state.selected_period]
 
@@ -195,7 +185,6 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# Análise
 first = chart_data["Close"].iloc[0]
 last = chart_data["Close"].iloc[-1]
 variation = ((last / first) - 1) * 100
