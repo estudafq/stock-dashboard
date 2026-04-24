@@ -5,7 +5,18 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Dashboard Ações", page_icon="📊", layout="wide")
 
-# ✔ Inclui QQQ3 (versão europeia em USD pode não existir no yfinance → usamos MI)
+# 🔥 SOLUÇÃO 2 – remover margens e expandir tudo
+st.markdown("""
+<style>
+.block-container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+    max-width: 100% !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Tickers (com QQQ3)
 TICKERS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
     "META", "TSLA", "AMD", "AVGO", "ASML",
@@ -25,6 +36,7 @@ PERIODS = {
     "6m": 126
 }
 
+# Estado
 if "selected_ticker" not in st.session_state:
     st.session_state.selected_ticker = "AAPL"
 
@@ -33,6 +45,7 @@ if "selected_period" not in st.session_state:
 
 st.title("📊 Dashboard Ações")
 
+# Dados
 @st.cache_data(ttl=300)
 def get_history(ticker):
     return yf.Ticker(ticker).history(period="1y", interval="1d").dropna()
@@ -72,7 +85,7 @@ def signal(v30, v3m, v6m, ticker):
         return "📈 Subida forte"
     return "Normal"
 
-# Construção da tabela
+# Construir tabela
 rows = []
 
 for ticker in TICKERS:
@@ -125,12 +138,13 @@ st.caption("Ordena clicando nos títulos. Clica numa linha para selecionar a aç
 event = st.dataframe(
     styled_df,
     use_container_width=True,
+    height=550,
     hide_index=True,
     on_select="rerun",
     selection_mode="single-row"
 )
 
-# Seleção da linha
+# Seleção
 try:
     if event.selection.rows:
         idx = event.selection.rows[0]
@@ -138,7 +152,7 @@ try:
 except:
     pass
 
-# Escolha período
+# Período
 st.markdown("### Período")
 
 period = st.segmented_control(
@@ -173,7 +187,7 @@ fig.add_trace(go.Scatter(
 
 fig.update_layout(
     height=500,
-    margin=dict(l=20, r=20, t=40, b=20),
+    margin=dict(l=10, r=10, t=30, b=10),
     xaxis_title="Data",
     yaxis_title="Preço",
     hovermode="x unified"
