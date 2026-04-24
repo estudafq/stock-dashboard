@@ -1,98 +1,194 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import plotly.graph_objects as go
 
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="Dashboard Ações",
+    page_icon="📊",
+    layout="wide"
+)
 
-# Lista de ações
-stocks = ["AAPL","MSFT","GOOGL","AMZN","NVDA","META","TSLA","AMD","AVGO","ASML"]
+TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AMD", "AVGO", "ASML"]
+
+PERIOD_MAP = {
+    "5d": 5,
+    "7d": 7,
+    "14d": 14,
+    "30d": 30,
+    "3m": 63,
+    "6m": 126
+}
 
 st.title("📊 Dashboard Ações")
 
-# Função para obter dados (corrigida para evitar erro de cache)
 @st.cache_data(ttl=300)
-def get_data(ticker):
+def get_history(ticker):
     stock = yf.Ticker(ticker)
-    hist = stock.history(period="6mo")
+    hist = stock.history(period="1y", interval="1d")
+    hist = hist.dropna()
     return hist
 
-# Construir tabela
-data = []
+def calc_variation(hist, days):
+    if len(hist) <= days:
+        return None
+    last = hist["Close"].iloc[-1]
+    previous = hist["Close"].iloc[-days]
+    return ((last / previous) - 1) * 100
 
-for s in stocks:
-    hist = get_data(s)
+def format_price_and_change(price, change):
+    if change is None:
+        return f"{price:.2f} (n/d)"
+    sign = "+" if change >= 0 else ""
+    return f"{price:.2f} ({sign}{change:.2f}%)"
 
-    if len(hist) < 30:
+def format_percent(value):
+    if value is None:
+        return "n/d"
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.2f}%"
+
+def signal_from_variation(v30, v3m, v6m):
+    values = [v for v in [v30, v3m, v6m] if v is not None]
+    if not values:
+        return "Sem dados"
+
+    min_drop = min(values)
+
+    if min_drop <= -20:
+        return "🔥🔥 Queda > 20%"
+    elif min_drop <= -15:
+        return "⚠️ Queda > 15%"
+    elif min_drop >= 15:
+        return "📈 Subida forte"
+    else:
+        return "Normal"
+
+rows = []
+
+for ticker in TICKERS:
+    hist = get_history(ticker)
+
+    if hist.empty or len(hist) < 30:
         continue
 
     price = hist["Close"].iloc[-1]
+    daily_change = calc_variation(hist, 2)
 
-    def perf(days):
-        try:
-            return ((price / hist["Close"].iloc[-days]) - 1) * 100
-        except:
-            return 0
+    v5 = calc_variation(hist, 5)
+    v7 = calc_variation(hist, 7)
+    v14 = calc_variation(hist, 14)
+    v30 = calc_variation(hist, 30)
+    v3m = calc_variation(hist, 63)
+    v6m = calc_variation(hist, 126)
 
-    p5 = perf(5)
-    p7 = perf(7)
-    p14 = perf(14)
-    p30 = perf(30)
+    rows.append({
+        "Ticker": ticker,
+        "Preço": format_price_and_change(price, daily_change),
+        "Hoje %": daily_change,
+        "5d": v5,
+        "7d": v7,
+        "14d": v14,
+        "30d": v30,
+        "3m": v3m,
+        "6m": v6m,
+        "Sinal": signal_from_variation(v30, v3m, v6m)
+    })
 
-    # Sinal
-    signal = "Normal"
-    if p30 <= -20:
-        signal = "🔥🔥 Oportunidade"
-    elif p30 <= -15:
-        signal = "⚠️ Atenção"
+df = pd.DataFrame(rows)
 
-    data.append([s, price, p5, p7, p14, p30, signal])
+display_df = df.copy()
 
-df = pd.DataFrame(data, columns=["Ticker","Preço","5d","7d","14d","30d","Sinal"])
+for col in ["Hoje %", "5d", "7d", "14d", "30d", "3m", "6m"]:
+    display_df[col] = display_df[col].apply(format_percent)
 
-# Seleção
-selected = st.selectbox("Seleciona a ação", df["Ticker"])
+def color_values(value):
+    if isinstance(value, str):
+        if value.startswith("+"):
+            return "color: #22c55e; font-weight: 700;"
+        if value.startswith("-"):
+            return "color: #ef4444; font-weight: 700;"
+    return ""
 
-# Mostrar tabela
-st.dataframe(df, use_container_width=True)
+styled_df = display_df.style.map(color_values)
 
-# Gráfico
-st.subheader(f"📈 Gráfico: {selected}")
+st.markdown("### Tabela geral")
 
-hist = get_data(selected)
+event = st.dataframe(
+    styled_df,
+    use_container_width=True,
+    hide_index=True,
+    on_select="rerun",
+    selection_mode="single-cell"
+)
 
-period = st.radio("Período", ["1 mês","3 meses","6 meses"])
+selected_ticker = df.iloc[0]["Ticker"]
+selected_period_label = "30d"
+selected_days = 30
 
-if period == "1 mês":
-    chart_data = hist.tail(30)
-elif period == "3 meses":
-    chart_data = hist.tail(90)
-else:
-    chart_data = hist
+try:
+    selected = event.selection
 
-st.line_chart(chart_data["Close"])
+    if selected.get("cells"):
+        cell = selected["cells"][0]
+        row_index = cell["row"]
+        column_name = cell["column"]
 
-# Análise automática
-st.subheader("📊 Análise automática")
+        selected_ticker = df.iloc[row_index]["Ticker"]
 
-last = chart_data["Close"].iloc[-1]
+        if column_name in PERIOD_MAP:
+            selected_period_label = column_name
+            selected_days = PERIOD_MAP[column_name]
+        else:
+            selected_period_label = "30d"
+            selected_days = 30
+
+    elif selected.get("rows"):
+        row_index = selected["rows"][0]
+        selected_ticker = df.iloc[row_index]["Ticker"]
+        selected_period_label = "30d"
+        selected_days = 30
+
+except Exception:
+    pass
+
+hist = get_history(selected_ticker)
+chart_data = hist.tail(selected_days)
+
+st.markdown(f"### 📈 Gráfico: {selected_ticker}, período {selected_period_label}")
+
+fig = go.Figure()
+
+fig.add_trace(go.Scatter(
+    x=chart_data.index,
+    y=chart_data["Close"],
+    mode="lines",
+    name="Preço de fecho"
+))
+
+fig.update_layout(
+    height=480,
+    margin=dict(l=20, r=20, t=40, b=20),
+    xaxis_title="Data",
+    yaxis_title="Preço",
+    hovermode="x unified"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
 first = chart_data["Close"].iloc[0]
+last = chart_data["Close"].iloc[-1]
 variation = ((last / first) - 1) * 100
 
+st.markdown("### 📊 Análise automática")
+
 if variation <= -20:
-    st.error("Queda superior a 20%. Pode ser oportunidade, mas verifica notícias e resultados.")
+    st.error(f"{selected_ticker} caiu {variation:.2f}% no período selecionado. É uma queda superior a 20%, pode ser zona de oportunidade, mas exige confirmação com notícias, resultados e tendência geral do mercado.")
 elif variation <= -15:
-    st.warning("Queda relevante. Boa zona para analisar entrada.")
+    st.warning(f"{selected_ticker} caiu {variation:.2f}% no período selecionado. É uma queda relevante, boa zona para analisar com calma.")
 elif variation >= 15:
-    st.info("Subida forte recente. Evitar comprar por impulso.")
+    st.info(f"{selected_ticker} subiu {variation:.2f}% no período selecionado. Pode haver risco de compra por impulso.")
 else:
-    st.success("Comportamento estável sem sinais extremos.")
+    st.success(f"{selected_ticker} variou {variation:.2f}% no período selecionado. Sem sinal extremo.")
 
-# Info extra
-st.subheader("📌 Sugestão")
-
-st.write("""
-✔ Confirmar sempre com notícias  
-✔ Ver se a queda foi por resultados  
-✔ Analisar tendência geral do mercado  
-✔ Não comprar só porque caiu  
-""")
+st.caption("Dados obtidos via yfinance. Podem ter atraso e não substituem análise financeira profissional.")
