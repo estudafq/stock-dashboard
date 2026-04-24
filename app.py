@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Dashboard Ações", page_icon="📊", layout="wide")
 
+# 🔥 layout full width
 st.markdown("""
 <style>
 .block-container {
@@ -44,7 +45,7 @@ st.title("📊 Dashboard Ações")
 
 @st.cache_data(ttl=300)
 def get_history(ticker):
-    return yf.Ticker(ticker).history(period="1y", interval="1d").dropna()
+    return yf.Ticker(ticker).history(period="1y").dropna()
 
 def calc_variation(hist, days):
     if len(hist) <= days:
@@ -64,20 +65,17 @@ def signal(v30, v3m, v6m, ticker):
     if not vals:
         return "Sem dados"
 
-    min_v = min(vals)
-    max_v = max(vals)
-
     if ticker == "QQQ3.MI":
-        if min_v <= -20:
+        if min(vals) <= -20:
             return "🔥 Entrada 3x"
-        if min_v <= -15:
+        if min(vals) <= -15:
             return "⚠️ Atenção 3x"
 
-    if min_v <= -20:
+    if min(vals) <= -20:
         return "🔥 Queda >20%"
-    if min_v <= -15:
+    if min(vals) <= -15:
         return "⚠️ Queda >15%"
-    if max_v >= 20:
+    if max(vals) >= 20:
         return "📈 Subida forte"
     return "Normal"
 
@@ -90,32 +88,23 @@ for ticker in TICKERS:
         continue
 
     price = hist["Close"].iloc[-1]
-    today = calc_variation(hist, 2)
-
-    v5 = calc_variation(hist, 5)
-    v7 = calc_variation(hist, 7)
-    v14 = calc_variation(hist, 14)
-    v30 = calc_variation(hist, 30)
-    v3m = calc_variation(hist, 63)
-    v6m = calc_variation(hist, 126)
 
     rows.append({
         "Ticker": NAMES.get(ticker, ticker),
-        "raw_ticker": ticker,
+        "raw": ticker,
         "Preço": price,
-        "Hoje %": today,
-        "5d": v5,
-        "7d": v7,
-        "14d": v14,
-        "30d": v30,
-        "3m": v3m,
-        "6m": v6m,
-        "Sinal": signal(v30, v3m, v6m, ticker)
+        "Hoje %": calc_variation(hist, 2),
+        "5d": calc_variation(hist, 5),
+        "7d": calc_variation(hist, 7),
+        "14d": calc_variation(hist, 14),
+        "30d": calc_variation(hist, 30),
+        "3m": calc_variation(hist, 63),
+        "6m": calc_variation(hist, 126),
     })
 
 df = pd.DataFrame(rows)
 
-styled_df = df.drop(columns=["raw_ticker"]).style.format({
+styled_df = df.drop(columns=["raw"]).style.format({
     "Preço": "{:.2f}",
     "Hoje %": "{:+.2f}%",
     "5d": "{:+.2f}%",
@@ -127,7 +116,6 @@ styled_df = df.drop(columns=["raw_ticker"]).style.format({
 }).map(color_pct, subset=["Hoje %", "5d", "7d", "14d", "30d", "3m", "6m"])
 
 st.markdown("### Tabela geral")
-st.caption("Ordena clicando nos títulos. Clica numa linha para selecionar a ação.")
 
 event = st.dataframe(
     styled_df,
@@ -140,7 +128,7 @@ event = st.dataframe(
 try:
     if event.selection.rows:
         idx = event.selection.rows[0]
-        st.session_state.selected_ticker = df.iloc[idx]["raw_ticker"]
+        st.session_state.selected_ticker = df.iloc[idx]["raw"]
 except:
     pass
 
@@ -160,44 +148,11 @@ ticker = st.session_state.selected_ticker
 days = PERIODS[st.session_state.selected_period]
 
 hist = get_history(ticker)
-chart_data = hist.tail(days)
+chart = hist.tail(days)
 
-name = NAMES.get(ticker, ticker)
-
-st.markdown(f"### 📈 Gráfico: {name}, período {st.session_state.selected_period}")
+st.markdown(f"### 📈 {NAMES.get(ticker, ticker)} ({st.session_state.selected_period})")
 
 fig = go.Figure()
-
-fig.add_trace(go.Scatter(
-    x=chart_data.index,
-    y=chart_data["Close"],
-    mode="lines",
-    name=name
-))
-
-fig.update_layout(
-    height=500,
-    margin=dict(l=10, r=10, t=30, b=10),
-    xaxis_title="Data",
-    yaxis_title="Preço",
-    hovermode="x unified"
-)
+fig.add_trace(go.Scatter(x=chart.index, y=chart["Close"]))
 
 st.plotly_chart(fig, use_container_width=True)
-
-first = chart_data["Close"].iloc[0]
-last = chart_data["Close"].iloc[-1]
-variation = ((last / first) - 1) * 100
-
-st.markdown("### 📊 Análise automática")
-
-if variation <= -20:
-    st.error(f"{name} caiu {variation:.2f}%. Possível oportunidade, mas confirmar fundamentos.")
-elif variation <= -15:
-    st.warning(f"{name} caiu {variation:.2f}%. Boa zona para analisar.")
-elif variation >= 20:
-    st.info(f"{name} subiu {variation:.2f}%. Cuidado com entrada tardia.")
-else:
-    st.success(f"{name} variou {variation:.2f}%. Sem sinal extremo.")
-
-st.caption("Dados via yfinance. Podem ter atraso.")
