@@ -5,7 +5,16 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Dashboard Ações", page_icon="📊", layout="wide")
 
-TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AMD", "AVGO", "ASML"]
+# ✔ Inclui QQQ3 (versão europeia em USD pode não existir no yfinance → usamos MI)
+TICKERS = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
+    "META", "TSLA", "AMD", "AVGO", "ASML",
+    "QQQ3.MI"
+]
+
+NAMES = {
+    "QQQ3.MI": "QQQ3 (Nasdaq 3x)"
+}
 
 PERIODS = {
     "5d": 5,
@@ -26,32 +35,44 @@ st.title("📊 Dashboard Ações")
 
 @st.cache_data(ttl=300)
 def get_history(ticker):
-    hist = yf.Ticker(ticker).history(period="1y", interval="1d")
-    return hist.dropna()
+    return yf.Ticker(ticker).history(period="1y", interval="1d").dropna()
 
 def calc_variation(hist, days):
     if len(hist) <= days:
         return None
-    last = hist["Close"].iloc[-1]
-    previous = hist["Close"].iloc[-days]
-    return ((last / previous) - 1) * 100
+    return ((hist["Close"].iloc[-1] / hist["Close"].iloc[-days]) - 1) * 100
 
-def signal(v30, v3m, v6m):
-    values = [v for v in [v30, v3m, v6m] if v is not None]
-    if not values:
+def color_pct(val):
+    if isinstance(val, (int, float)):
+        if val > 0:
+            return "color:#22c55e; font-weight:700;"
+        elif val < 0:
+            return "color:#ef4444; font-weight:700;"
+    return ""
+
+def signal(v30, v3m, v6m, ticker):
+    vals = [v for v in [v30, v3m, v6m] if v is not None]
+    if not vals:
         return "Sem dados"
 
-    min_v = min(values)
-    max_v = max(values)
+    min_v = min(vals)
+    max_v = max(vals)
+
+    if ticker == "QQQ3.MI":
+        if min_v <= -20:
+            return "🔥 Entrada 3x"
+        if min_v <= -15:
+            return "⚠️ Atenção 3x"
 
     if min_v <= -20:
-        return "🔥 Queda > 20%"
+        return "🔥 Queda >20%"
     if min_v <= -15:
-        return "⚠️ Queda > 15%"
+        return "⚠️ Queda >15%"
     if max_v >= 20:
         return "📈 Subida forte"
     return "Normal"
 
+# Construção da tabela
 rows = []
 
 for ticker in TICKERS:
@@ -71,7 +92,8 @@ for ticker in TICKERS:
     v6m = calc_variation(hist, 126)
 
     rows.append({
-        "Ticker": ticker,
+        "Ticker": NAMES.get(ticker, ticker),
+        "raw_ticker": ticker,
         "Preço": price,
         "Hoje %": today,
         "5d": v5,
@@ -80,20 +102,13 @@ for ticker in TICKERS:
         "30d": v30,
         "3m": v3m,
         "6m": v6m,
-        "Sinal": signal(v30, v3m, v6m)
+        "Sinal": signal(v30, v3m, v6m, ticker)
     })
 
 df = pd.DataFrame(rows)
 
-def color_pct(value):
-    if isinstance(value, (int, float)):
-        if value > 0:
-            return "color: #22c55e; font-weight: 700;"
-        if value < 0:
-            return "color: #ef4444; font-weight: 700;"
-    return ""
-
-styled_df = df.style.format({
+# Estilo
+styled_df = df.drop(columns=["raw_ticker"]).style.format({
     "Preço": "{:.2f}",
     "Hoje %": "{:+.2f}%",
     "5d": "{:+.2f}%",
@@ -105,7 +120,7 @@ styled_df = df.style.format({
 }).map(color_pct, subset=["Hoje %", "5d", "7d", "14d", "30d", "3m", "6m"])
 
 st.markdown("### Tabela geral")
-st.caption("Podes ordenar a tabela clicando nos cabeçalhos. Clica numa linha para escolher a ação.")
+st.caption("Ordena clicando nos títulos. Clica numa linha para selecionar a ação.")
 
 event = st.dataframe(
     styled_df,
@@ -115,14 +130,16 @@ event = st.dataframe(
     selection_mode="single-row"
 )
 
+# Seleção da linha
 try:
-    selected_rows = event.selection.rows
-    if selected_rows:
-        st.session_state.selected_ticker = df.iloc[selected_rows[0]]["Ticker"]
-except Exception:
+    if event.selection.rows:
+        idx = event.selection.rows[0]
+        st.session_state.selected_ticker = df.iloc[idx]["raw_ticker"]
+except:
     pass
 
-st.markdown("### Escolhe o período do gráfico")
+# Escolha período
+st.markdown("### Período")
 
 period = st.segmented_control(
     "Período",
@@ -134,22 +151,24 @@ period = st.segmented_control(
 if period:
     st.session_state.selected_period = period
 
-selected_ticker = st.session_state.selected_ticker
-selected_period = st.session_state.selected_period
-selected_days = PERIODS[selected_period]
+# Gráfico
+ticker = st.session_state.selected_ticker
+days = PERIODS[st.session_state.selected_period]
 
-hist = get_history(selected_ticker)
-chart_data = hist.tail(selected_days)
+hist = get_history(ticker)
+chart_data = hist.tail(days)
 
-st.markdown(f"### 📈 Gráfico: {selected_ticker}, período {selected_period}")
+name = NAMES.get(ticker, ticker)
+
+st.markdown(f"### 📈 Gráfico: {name}, período {st.session_state.selected_period}")
 
 fig = go.Figure()
 
 fig.add_trace(go.Scatter(
     x=chart_data.index,
     y=chart_data["Close"],
-    mode="lines+markers",
-    name=selected_ticker
+    mode="lines",
+    name=name
 ))
 
 fig.update_layout(
@@ -162,6 +181,7 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
+# Análise
 first = chart_data["Close"].iloc[0]
 last = chart_data["Close"].iloc[-1]
 variation = ((last / first) - 1) * 100
@@ -169,12 +189,12 @@ variation = ((last / first) - 1) * 100
 st.markdown("### 📊 Análise automática")
 
 if variation <= -20:
-    st.error(f"{selected_ticker} caiu {variation:.2f}% em {selected_period}. Queda superior a 20%, pode ser oportunidade, mas confirma notícias, resultados e tendência geral.")
+    st.error(f"{name} caiu {variation:.2f}%. Possível oportunidade, mas confirmar fundamentos.")
 elif variation <= -15:
-    st.warning(f"{selected_ticker} caiu {variation:.2f}% em {selected_period}. Queda relevante, boa zona para analisar entrada.")
+    st.warning(f"{name} caiu {variation:.2f}%. Boa zona para analisar.")
 elif variation >= 20:
-    st.info(f"{selected_ticker} subiu {variation:.2f}% em {selected_period}. Cuidado com compra por impulso.")
+    st.info(f"{name} subiu {variation:.2f}%. Cuidado com entrada tardia.")
 else:
-    st.success(f"{selected_ticker} variou {variation:.2f}% em {selected_period}. Sem sinal extremo.")
+    st.success(f"{name} variou {variation:.2f}%. Sem sinal extremo.")
 
-st.caption("Dados obtidos via yfinance. Podem ter atraso e não substituem análise financeira profissional.")
+st.caption("Dados via yfinance. Podem ter atraso.")
