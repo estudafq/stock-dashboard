@@ -36,23 +36,11 @@ def calc_variation(hist, days):
     previous = hist["Close"].iloc[-days]
     return ((last / previous) - 1) * 100
 
-def fmt_pct(v):
-    if v is None:
-        return "n/d"
-    sign = "+" if v >= 0 else ""
-    return f"{sign}{v:.2f}%"
-
-def pct_html(v):
-    if v is None:
-        return "<span style='color:#94a3b8'>n/d</span>"
-    color = "#22c55e" if v >= 0 else "#ef4444"
-    sign = "+" if v >= 0 else ""
-    return f"<span style='color:{color}; font-weight:700'>{sign}{v:.2f}%</span>"
-
 def signal(v30, v3m, v6m):
     values = [v for v in [v30, v3m, v6m] if v is not None]
     if not values:
         return "Sem dados"
+
     min_v = min(values)
     max_v = max(values)
 
@@ -75,51 +63,76 @@ for ticker in TICKERS:
     price = hist["Close"].iloc[-1]
     today = calc_variation(hist, 2)
 
-    values = {label: calc_variation(hist, days) for label, days in PERIODS.items()}
+    v5 = calc_variation(hist, 5)
+    v7 = calc_variation(hist, 7)
+    v14 = calc_variation(hist, 14)
+    v30 = calc_variation(hist, 30)
+    v3m = calc_variation(hist, 63)
+    v6m = calc_variation(hist, 126)
 
     rows.append({
         "Ticker": ticker,
         "Preço": price,
-        "Hoje": today,
-        **values,
-        "Sinal": signal(values["30d"], values["3m"], values["6m"])
+        "Hoje %": today,
+        "5d": v5,
+        "7d": v7,
+        "14d": v14,
+        "30d": v30,
+        "3m": v3m,
+        "6m": v6m,
+        "Sinal": signal(v30, v3m, v6m)
     })
 
 df = pd.DataFrame(rows)
 
-st.markdown("### Tabela geral, clica na ação ou numa percentagem")
+def color_pct(value):
+    if isinstance(value, (int, float)):
+        if value > 0:
+            return "color: #22c55e; font-weight: 700;"
+        if value < 0:
+            return "color: #ef4444; font-weight: 700;"
+    return ""
 
-header = st.columns([1.2, 1.5, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.8])
-headers = ["Ticker", "Preço", "Hoje", "5d", "7d", "14d", "30d", "3m", "6m", "Sinal"]
+styled_df = df.style.format({
+    "Preço": "{:.2f}",
+    "Hoje %": "{:+.2f}%",
+    "5d": "{:+.2f}%",
+    "7d": "{:+.2f}%",
+    "14d": "{:+.2f}%",
+    "30d": "{:+.2f}%",
+    "3m": "{:+.2f}%",
+    "6m": "{:+.2f}%"
+}).map(color_pct, subset=["Hoje %", "5d", "7d", "14d", "30d", "3m", "6m"])
 
-for col, h in zip(header, headers):
-    col.markdown(f"**{h}**")
+st.markdown("### Tabela geral")
+st.caption("Podes ordenar a tabela clicando nos cabeçalhos. Clica numa linha para escolher a ação.")
 
-for _, row in df.iterrows():
-    cols = st.columns([1.2, 1.5, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.8])
+event = st.dataframe(
+    styled_df,
+    use_container_width=True,
+    hide_index=True,
+    on_select="rerun",
+    selection_mode="single-row"
+)
 
-    ticker = row["Ticker"]
+try:
+    selected_rows = event.selection.rows
+    if selected_rows:
+        st.session_state.selected_ticker = df.iloc[selected_rows[0]]["Ticker"]
+except Exception:
+    pass
 
-    if cols[0].button(ticker, key=f"{ticker}_ticker", use_container_width=True):
-        st.session_state.selected_ticker = ticker
-        st.session_state.selected_period = "30d"
-        st.rerun()
+st.markdown("### Escolhe o período do gráfico")
 
-    cols[1].markdown(
-        f"**{row['Preço']:.2f}** ({pct_html(row['Hoje'])})",
-        unsafe_allow_html=True
-    )
+period = st.segmented_control(
+    "Período",
+    options=list(PERIODS.keys()),
+    default=st.session_state.selected_period,
+    label_visibility="collapsed"
+)
 
-    cols[2].markdown(pct_html(row["Hoje"]), unsafe_allow_html=True)
-
-    for i, p in enumerate(["5d", "7d", "14d", "30d", "3m", "6m"], start=3):
-        label = fmt_pct(row[p])
-        if cols[i].button(label, key=f"{ticker}_{p}", use_container_width=True):
-            st.session_state.selected_ticker = ticker
-            st.session_state.selected_period = p
-            st.rerun()
-
-    cols[9].markdown(row["Sinal"])
+if period:
+    st.session_state.selected_period = period
 
 selected_ticker = st.session_state.selected_ticker
 selected_period = st.session_state.selected_period
